@@ -6,10 +6,12 @@ local Players           = game:GetService("Players")
 local TeleportService   = game:GetService("TeleportService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CoreGui           = game:GetService("CoreGui")
+local RunService        = game:GetService("RunService")
 
 local CMD_FILE    = "MyGuiCmd.txt"
 local STATUS_FILE = "MyGuiStatus.txt"
 local TOGGLE_FILE = "MyGuiToggle.json"
+local STATS_FILE  = "MyGuiStats.json"
 local SCRIPT_URL  = "https://raw.githubusercontent.com/10284837295729385/55566112366366623663663/refs/heads/main/treadmilautospeed.lua"
 
 -- ---------- stan ----------
@@ -30,9 +32,38 @@ end
 local on = loadToggle()
 saveToggle(on)
 
+-- ---------- dane ----------
+local function getSpeed()
+    local ok, v = pcall(function()
+        return game:GetService("Players").LocalPlayer.leaderstats.Speed.Value
+    end)
+    return ok and tonumber(v) or 0
+end
+
+local function getMoney()
+    local ok, v = pcall(function()
+        return game:GetService("Players").LocalPlayer.PlayerGui.HUD.GameHUD.BottomLeft.Money.Value.Text
+    end)
+    if not ok then return 0 end
+    local s = tostring(v):gsub("[^%d%.%-]", "")
+    return tonumber(s) or 0
+end
+
+local startTime    = tick()
+local startSpeed   = getSpeed()
+local startMoney   = getMoney()
+local eventCount   = 0
+local lastSpeed    = startSpeed
+local lastSpeedT   = tick()
+local speedPerSec  = 0
+local lastMoney    = startMoney
+local lastMoneyT   = tick()
+local moneyPerSec  = 0
+
 -- ---------- akcje ----------
 local function fireEvent()
     ReplicatedStorage.Packages.Networking["RF/Treadmill/AskWearStill"]:InvokeServer()
+    eventCount = eventCount + 1
 end
 
 local function startLoop()
@@ -103,6 +134,61 @@ task.spawn(function()
     end
 end)
 
+-- ---------- pomiar tempa ----------
+task.spawn(function()
+    while true do
+        task.wait(1)
+        local now = tick()
+        local sp  = getSpeed()
+        local mn  = getMoney()
+
+        local dtS = now - lastSpeedT
+        if dtS > 0 then
+            local delta = sp - lastSpeed
+            if delta >= 0 then
+                speedPerSec = speedPerSec*0.7 + (delta/dtS)*0.3
+            end
+        end
+        lastSpeed = sp
+        lastSpeedT = now
+
+        local dtM = now - lastMoneyT
+        if dtM > 0 then
+            local delta = mn - lastMoney
+            if delta >= 0 then
+                moneyPerSec = moneyPerSec*0.7 + (delta/dtM)*0.3
+            end
+        end
+        lastMoney = mn
+        lastMoneyT = now
+    end
+end)
+
+-- ---------- zapis statsow ----------
+local function writeStats()
+    local sp = getSpeed()
+    local mn = getMoney()
+    local data = {
+        uptime      = tick() - startTime,
+        speed       = sp,
+        speedGain   = sp - startSpeed,
+        speedPerSec = speedPerSec,
+        money       = mn,
+        moneyGain   = mn - startMoney,
+        moneyPerSec = moneyPerSec,
+        eventCount  = eventCount,
+        enabled     = on,
+    }
+    pcall(writefile, STATS_FILE, HttpService:JSONEncode(data))
+end
+
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        writeStats()
+    end
+end)
+
 -- ---------- komendy ----------
 local function writeStatus()
     pcall(writefile, STATUS_FILE, on and "1" or "0")
@@ -125,6 +211,15 @@ local function doOff()
     saveToggle(false)
 end
 
+local function doReset()
+    startTime   = tick()
+    startSpeed  = getSpeed()
+    startMoney  = getMoney()
+    eventCount  = 0
+    speedPerSec = 0
+    moneyPerSec = 0
+end
+
 task.spawn(function()
     while true do
         task.wait(0.3)
@@ -135,18 +230,11 @@ task.spawn(function()
             if cmd == "toggle" then doToggle()
             elseif cmd == "rejoin" then doRejoin()
             elseif cmd == "off" then doOff()
+            elseif cmd == "reset" then doReset()
             elseif cmd == "status" then writeStatus()
             end
         end
     end
 end)
 
--- co 1s aktualizuj status zeby strona wiedziala
-task.spawn(function()
-    while true do
-        task.wait(1)
-        writeStatus()
-    end
-end)
-
-print("[MyGui] Uruchomiony. Workspace: Potassium")
+print("[MyGui] Uruchomiony z panelem statystyk.")
