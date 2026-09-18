@@ -1,44 +1,90 @@
-local Players = game:GetService("Players")
-local TeleportService = game:GetService("TeleportService")
-local HttpService = game:GetService("HttpService")
-local CoreGui = game:GetService("CoreGui")
+-- ================= Roblox (executor) =================
+-- Uruchom w executorze Potassium
 
-local SCRIPT_URL = "TWOJ_URL_DO_SCRIPTU"
+local HttpService       = game:GetService("HttpService")
+local Players           = game:GetService("Players")
+local TeleportService   = game:GetService("TeleportService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CoreGui           = game:GetService("CoreGui")
 
-local FILE = "MyGuiToggle.json"
+local CMD_FILE    = "MyGuiCmd.txt"
+local STATUS_FILE = "MyGuiStatus.txt"
+local TOGGLE_FILE = "MyGuiToggle.json"
+local SCRIPT_URL  = "https://raw.githubusercontent.com/10284837295729385/55566112366366623663663/refs/heads/main/treadmilautospeed.lua"
 
+-- ---------- stan ----------
 local function loadToggle()
-    local ok, data = pcall(function()
-        return readfile(FILE)
-    end)
+    local ok, data = pcall(readfile, TOGGLE_FILE)
     if ok and data then
-        local ok2, decoded = pcall(function()
-            return HttpService:JSONDecode(data)
-        end)
-        if ok2 and decoded then
-            return decoded.on
-        end
+        local ok2, d = pcall(function() return HttpService:JSONDecode(data) end)
+        if ok2 and d then return d.on end
     end
     return false
 end
 
 local function saveToggle(state)
-    pcall(function()
-        writefile(FILE, HttpService:JSONEncode({on = state}))
+    pcall(writefile, TOGGLE_FILE, HttpService:JSONEncode({on = state}))
+    pcall(writefile, STATUS_FILE, state and "1" or "0")
+end
+
+local on = loadToggle()
+saveToggle(on)
+
+-- ---------- akcje ----------
+local function fireEvent()
+    ReplicatedStorage.Packages.Networking["RF/Treadmill/AskWearStill"]:InvokeServer()
+end
+
+local function startLoop()
+    task.spawn(function()
+        while on do
+            pcall(fireEvent)
+            task.wait(5)
+        end
     end)
 end
 
+if on then startLoop() end
+
+local function queueScript()
+    local code = "loadstring(game:HttpGet('" .. SCRIPT_URL .. "'))()"
+    if syn and syn.queue_on_teleport then syn.queue_on_teleport(code)
+    elseif queue_on_teleport then queue_on_teleport(code)
+    elseif fluxus and fluxus.queue_on_teleport then fluxus.queue_on_teleport(code)
+    elseif krnl and krnl.queue_on_teleport then krnl.queue_on_teleport(code) end
+end
+
+queueScript()
+
+-- ---------- gui ----------
 local sg = Instance.new("ScreenGui")
 sg.Name = "MyGui"
 sg.Parent = CoreGui
 
 local f = Instance.new("Frame")
-f.Size = UDim2.new(0, 200, 0, 160)
-f.Position = UDim2.new(0.5, -100, 0.5, -80)
+f.Size = UDim2.new(0, 220, 0, 110)
+f.Position = UDim2.new(0.5, -110, 0.5, -55)
 f.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 f.Active = true
 f.Draggable = true
 f.Parent = sg
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 25)
+title.BackgroundTransparency = 1
+title.Text = "Panel (telefon -> gra)"
+title.TextColor3 = Color3.new(1, 1, 1)
+title.TextScaled = true
+title.Parent = f
+
+local status = Instance.new("TextLabel")
+status.Size = UDim2.new(1, 0, 0, 40)
+status.Position = UDim2.new(0, 0, 0, 30)
+status.BackgroundTransparency = 1
+status.Text = on and "ON" or "OFF"
+status.TextColor3 = on and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(200, 50, 50)
+status.TextScaled = true
+status.Parent = f
 
 local x = Instance.new("TextButton")
 x.Size = UDim2.new(0, 25, 0, 25)
@@ -47,67 +93,60 @@ x.Text = "X"
 x.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
 x.TextColor3 = Color3.new(1, 1, 1)
 x.Parent = f
-x.MouseButton1Click:Connect(function()
-    sg:Destroy()
+x.MouseButton1Click:Connect(function() sg:Destroy() end)
+
+task.spawn(function()
+    while sg.Parent do
+        task.wait(0.2)
+        status.Text = on and "ON" or "OFF"
+        status.TextColor3 = on and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(200, 50, 50)
+    end
 end)
 
-local toggle = Instance.new("TextButton")
-toggle.Size = UDim2.new(0, 80, 0, 30)
-toggle.Position = UDim2.new(0.5, -40, 0.5, -40)
-toggle.Text = "OFF"
-toggle.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-toggle.TextColor3 = Color3.new(1, 1, 1)
-toggle.Parent = f
-
-local rejoinBtn = Instance.new("TextButton")
-rejoinBtn.Size = UDim2.new(0, 80, 0, 30)
-rejoinBtn.Position = UDim2.new(0.5, -40, 0.5, 10)
-rejoinBtn.Text = "REJOIN"
-rejoinBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 160)
-rejoinBtn.TextColor3 = Color3.new(1, 1, 1)
-rejoinBtn.Parent = f
-
-local on = loadToggle()
-toggle.Text = on and "ON" or "OFF"
-toggle.BackgroundColor3 = on and Color3.fromRGB(50, 180, 50) or Color3.fromRGB(60, 60, 60)
-
-local function startLoop()
-    task.spawn(function()
-        while on do
-            pcall(function()
-                local Event = game:GetService("ReplicatedStorage").Packages.Networking["RF/Treadmill/AskWearStill"]
-                Event:InvokeServer()
-            end)
-            task.wait(5)
-        end
-    end)
+-- ---------- komendy ----------
+local function writeStatus()
+    pcall(writefile, STATUS_FILE, on and "1" or "0")
 end
 
-if on then
-    startLoop()
-end
-
-toggle.MouseButton1Click:Connect(function()
+local function doToggle()
     on = not on
-    toggle.Text = on and "ON" or "OFF"
-    toggle.BackgroundColor3 = on and Color3.fromRGB(50, 180, 50) or Color3.fromRGB(60, 60, 60)
     saveToggle(on)
-    if on then
-        startLoop()
+    if on then startLoop() end
+end
+
+local function doRejoin()
+    saveToggle(on)
+    queueScript()
+    TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, Players.LocalPlayer)
+end
+
+local function doOff()
+    on = false
+    saveToggle(false)
+end
+
+task.spawn(function()
+    while true do
+        task.wait(0.3)
+        local ok, data = pcall(readfile, CMD_FILE)
+        if ok and data and data ~= "" then
+            pcall(writefile, CMD_FILE, "")
+            local cmd = tostring(data):match("^%s*(.-)%s*$"):lower()
+            if cmd == "toggle" then doToggle()
+            elseif cmd == "rejoin" then doRejoin()
+            elseif cmd == "off" then doOff()
+            elseif cmd == "status" then writeStatus()
+            end
+        end
     end
 end)
 
-rejoinBtn.MouseButton1Click:Connect(function()
-    saveToggle(on)
-    local code = "loadstring(game:HttpGet('" .. SCRIPT_URL .. "'))()"
-    if syn and syn.queue_on_teleport then
-        syn.queue_on_teleport(code)
-    elseif queue_on_teleport then
-        queue_on_teleport(code)
-    elseif fluxus and fluxus.queue_on_teleport then
-        fluxus.queue_on_teleport(code)
-    elseif krnl and krnl.queue_on_teleport then
-        krnl.queue_on_teleport(code)
+-- co 1s aktualizuj status zeby strona wiedziala
+task.spawn(function()
+    while true do
+        task.wait(1)
+        writeStatus()
     end
-    TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, Players.LocalPlayer)
 end)
+
+print("[MyGui] Uruchomiony. Workspace: Potassium")
