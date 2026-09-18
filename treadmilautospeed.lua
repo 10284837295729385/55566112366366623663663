@@ -6,70 +6,97 @@ local Players           = game:GetService("Players")
 local TeleportService   = game:GetService("TeleportService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CoreGui           = game:GetService("CoreGui")
-local RunService        = game:GetService("RunService")
 
 local CMD_FILE    = "MyGuiCmd.txt"
 local STATUS_FILE = "MyGuiStatus.txt"
-local TOGGLE_FILE = "MyGuiToggle.json"
 local STATS_FILE  = "MyGuiStats.json"
+local STATE_FILE  = "MyGuiState.json"
 local SCRIPT_URL  = "https://raw.githubusercontent.com/10284837295729385/55566112366366623663663/refs/heads/main/treadmilautospeed.lua"
 
--- ---------- stan ----------
-local function loadToggle()
-    local ok, data = pcall(readfile, TOGGLE_FILE)
-    if ok and data then
+-- ---------- pomocnicze ----------
+local function readJson(file, default)
+    local ok, data = pcall(readfile, file)
+    if ok and data and data ~= "" then
         local ok2, d = pcall(function() return HttpService:JSONDecode(data) end)
-        if ok2 and d then return d.on end
+        if ok2 and d then return d end
     end
-    return false
+    return default
 end
 
-local function saveToggle(state)
-    pcall(writefile, TOGGLE_FILE, HttpService:JSONEncode({on = state}))
-    pcall(writefile, STATUS_FILE, state and "1" or "0")
+local function writeJson(file, tbl)
+    pcall(writefile, file, HttpService:JSONEncode(tbl))
 end
 
-local on = loadToggle()
-saveToggle(on)
+-- ---------- stan ----------
+local state = readJson(STATE_FILE, {
+    startSpeed = nil,
+    startMoney = nil,
+    moneyBase  = nil,
+    eventCount = 0,
+})
 
--- ---------- dane ----------
+local on = readJson("MyGuiToggle.json", {on = false}).on
+pcall(writefile, STATUS_FILE, on and "1" or "0")
+
+-- ---------- dane z gry ----------
 local function getSpeed()
     local ok, v = pcall(function()
-        return game:GetService("Players").LocalPlayer.leaderstats.Speed.Value
+        return tonumber(Players.LocalPlayer.leaderstats.Speed.Value)
     end)
-    return ok and tonumber(v) or 0
+    return ok and v or 0
 end
 
-local function getMoney()
+local function getMoneyRaw()
     local ok, v = pcall(function()
-        return game:GetService("Players").LocalPlayer.PlayerGui.HUD.GameHUD.BottomLeft.Money.Value.Text
+        return Players.LocalPlayer.PlayerGui.HUD.GameHUD.BottomLeft.Money.Value.Text
     end)
-    if not ok then return 0 end
-    local s = tostring(v):gsub("[^%d%.%-]", "")
-    return tonumber(s) or 0
+    if ok and v ~= nil then return tostring(v) end
+    return "0"
 end
 
-local startTime    = tick()
-local startSpeed   = getSpeed()
-local startMoney   = getMoney()
-local eventCount   = 0
-local lastSpeed    = startSpeed
-local lastSpeedT   = tick()
-local speedPerSec  = 0
-local lastMoney    = startMoney
-local lastMoneyT   = tick()
-local moneyPerSec  = 0
+local function getMoneyNum()
+    local s = getMoneyRaw()
+    local mult = 1
+    local num = s
+    local suffix = s:match("([KkMmBbTt])%s*$")
+    if suffix then
+        suffix = suffix:upper()
+        if suffix == "K" then mult = 1e3
+        elseif suffix == "M" then mult = 1e6
+        elseif suffix == "B" then mult = 1e9
+        elseif suffix == "T" then mult = 1e12 end
+        num = s:gsub("[KkMmBbTt%s%$%,]", "")
+    else
+        num = s:gsub("[%s%$%,]", "")
+    end
+    local parsed = tonumber(num)
+    if not parsed then return 0 end
+    return parsed * mult
+end
 
--- ---------- akcje ----------
+-- inicjalizacja bazy
+if state.startSpeed == nil then state.startSpeed = getSpeed() end
+if state.moneyBase == nil then state.moneyBase = getMoneyNum() end
+
+-- ---------- czas pracy: liczymy w oparciu o tick() z pauza ----------
+local sessionStart = tick()
+
+local function getUptime()
+    return tick() - sessionStart
+end
+
+-- ---------- event ----------
 local function fireEvent()
-    ReplicatedStorage.Packages.Networking["RF/Treadmill/AskWearStill"]:InvokeServer()
-    eventCount = eventCount + 1
+    pcall(function()
+        ReplicatedStorage.Packages.Networking["RF/Treadmill/AskWearStill"]:InvokeServer()
+    end)
+    state.eventCount = (state.eventCount or 0) + 1
 end
 
 local function startLoop()
     task.spawn(function()
         while on do
-            pcall(fireEvent)
+            fireEvent()
             task.wait(5)
         end
     end)
@@ -87,7 +114,7 @@ end
 
 queueScript()
 
--- ---------- gui ----------
+-- ---------- GUI ----------
 local sg = Instance.new("ScreenGui")
 sg.Name = "MyGui"
 sg.Parent = CoreGui
@@ -134,95 +161,66 @@ task.spawn(function()
     end
 end)
 
--- ---------- pomiar tempa ----------
-task.spawn(function()
-    while true do
-        task.wait(1)
-        local now = tick()
-        local sp  = getSpeed()
-        local mn  = getMoney()
-
-        local dtS = now - lastSpeedT
-        if dtS > 0 then
-            local delta = sp - lastSpeed
-            if delta >= 0 then
-                speedPerSec = speedPerSec*0.7 + (delta/dtS)*0.3
-            end
-        end
-        lastSpeed = sp
-        lastSpeedT = now
-
-        local dtM = now - lastMoneyT
-        if dtM > 0 then
-            local delta = mn - lastMoney
-            if delta >= 0 then
-                moneyPerSec = moneyPerSec*0.7 + (delta/dtM)*0.3
-            end
-        end
-        lastMoney = mn
-        lastMoneyT = now
-    end
-end)
-
 -- ---------- zapis statsow ----------
 local function writeStats()
-    local sp = getSpeed()
-    local mn = getMoney()
-    local data = {
-        uptime      = tick() - startTime,
-        speed       = sp,
-        speedGain   = sp - startSpeed,
-        speedPerSec = speedPerSec,
-        money       = mn,
-        moneyGain   = mn - startMoney,
-        moneyPerSec = moneyPerSec,
-        eventCount  = eventCount,
-        enabled     = on,
-    }
-    pcall(writefile, STATS_FILE, HttpService:JSONEncode(data))
+    local sp  = getSpeed()
+    local mn  = getMoneyNum()
+    local txt = getMoneyRaw()
+
+    writeJson(STATS_FILE, {
+        uptime     = getUptime(),
+        speed      = sp,
+        speedGain  = sp - (state.startSpeed or sp),
+        money      = mn,
+        moneyText  = txt,
+        moneyGain  = mn - (state.moneyBase or mn),
+        eventCount = state.eventCount or 0,
+        enabled    = on,
+    })
 end
 
 task.spawn(function()
     while true do
-        task.wait(0.5)
+        task.wait(0.25)
         writeStats()
     end
 end)
 
 -- ---------- komendy ----------
-local function writeStatus()
+local function writeToggle()
+    writeJson("MyGuiToggle.json", {on = on})
     pcall(writefile, STATUS_FILE, on and "1" or "0")
 end
 
 local function doToggle()
     on = not on
-    saveToggle(on)
+    writeToggle()
     if on then startLoop() end
 end
 
 local function doRejoin()
-    saveToggle(on)
+    writeJson(STATE_FILE, state)
+    writeToggle()
     queueScript()
     TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, Players.LocalPlayer)
 end
 
 local function doOff()
     on = false
-    saveToggle(false)
+    writeToggle()
 end
 
 local function doReset()
-    startTime   = tick()
-    startSpeed  = getSpeed()
-    startMoney  = getMoney()
-    eventCount  = 0
-    speedPerSec = 0
-    moneyPerSec = 0
+    state.startSpeed = getSpeed()
+    state.moneyBase  = getMoneyNum()
+    state.eventCount = 0
+    sessionStart = tick()
+    writeJson(STATE_FILE, state)
 end
 
 task.spawn(function()
     while true do
-        task.wait(0.3)
+        task.wait(0.25)
         local ok, data = pcall(readfile, CMD_FILE)
         if ok and data and data ~= "" then
             pcall(writefile, CMD_FILE, "")
@@ -231,10 +229,9 @@ task.spawn(function()
             elseif cmd == "rejoin" then doRejoin()
             elseif cmd == "off" then doOff()
             elseif cmd == "reset" then doReset()
-            elseif cmd == "status" then writeStatus()
             end
         end
     end
 end)
 
-print("[MyGui] Uruchomiony z panelem statystyk.")
+print("[MyGui] Uruchomiony.")
